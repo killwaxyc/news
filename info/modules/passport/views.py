@@ -1,5 +1,6 @@
 import random
 import re
+from datetime import datetime
 
 from flask import current_app, jsonify, make_response, request, session
 from info import constants, redis_store, db
@@ -23,7 +24,7 @@ def get_iamge_code():
     print(text)
     try:
         # 保存当前生成的图片验证码内容    setex(key, time, value)
-        redis_store.setex('ImageCode_'+code_id, constants.IMAGE_CODE_REDIS_EXPIRES, text)
+        redis_store.setex('ImageCode_' + code_id, constants.IMAGE_CODE_REDIS_EXPIRES, text)
     except Exception as e:
         current_app.logger.error(e)
         return make_response(jsonify(errno=RET.DATAERR, errmsg='保存图片验证码失败'))
@@ -65,11 +66,11 @@ def send_sms():
 
     # 3. 通过传入的图片编码去redis中查询真实的图片验证码内容
     try:
-        real_image_code = redis_store.get('ImageCode_'+image_code_id)
+        real_image_code = redis_store.get('ImageCode_' + image_code_id)
         # 如果能够取出来值，删除redis中缓存的内容
         if real_image_code:
             real_image_code = real_image_code.decode()
-            redis_store.delete('ImageCode_'+image_code_id)
+            redis_store.delete('ImageCode_' + image_code_id)
     except Exception as e:
         current_app.logger.error(e)
         return jsonify(errno=RET.DBERR, errmsg="获取图片验证码失败")
@@ -95,8 +96,8 @@ def send_sms():
         return jsonify(errno=RET.DATAEXIST, errmsg="该手机已被注册")
 
     # 5. 生成发送短信的内容并发送短信
-    sms_code = random.randint(0,999999)
-    sms_code = "%06d"%sms_code
+    sms_code = random.randint(0, 999999)
+    sms_code = "%06d" % sms_code
     print(sms_code)
     # result = CCP().send_template_sms(mobile, [sms_code, constants.SMS_CODE_REDIS_EXPIRES/60], '1')
     #
@@ -106,7 +107,7 @@ def send_sms():
 
     # 发送短信成功，就保存到redis中去
     try:
-        redis_store.setex('SMS_'+mobile, constants.SMS_CODE_REDIS_EXPIRES, sms_code)
+        redis_store.setex('SMS_' + mobile, constants.SMS_CODE_REDIS_EXPIRES, sms_code)
     except Exception as e:
         current_app.logger.error(e)
         # 保存短信验证码失败
@@ -137,7 +138,7 @@ def register():
         return jsonify(errno=RET.PARAMERR, errmsg="参数不全")
 
     try:
-        real_smscode = redis_store.get('SMS_'+mobile)
+        real_smscode = redis_store.get('SMS_' + mobile)
     except Exception as e:
         current_app.logger.error(e)
         # 获取本地验证码失败
@@ -151,7 +152,7 @@ def register():
         return jsonify(errno=RET.DATAERR, errmsg="短信验证码错误")
     # 删除短信验证码
     try:
-        redis_store.delete('SMS_'+mobile)
+        redis_store.delete('SMS_' + mobile)
     except Exception as e:
         current_app.logger.error(e)
 
@@ -178,3 +179,52 @@ def register():
 
     # 6. 返回注册结果
     return jsonify(errno=RET.OK, errmsg="OK")
+
+
+@passport_blu.route('/login', methods=["POST"])
+def login():
+    """
+       1. 获取参数和判断是否有值
+       2. 从数据库查询出指定的用户
+       3. 校验密码
+       4. 保存用户登录状态
+       5. 返回结果
+       :return:
+       """
+    json_data = request.json
+
+    mobile = json_data.get('mobile')
+    password = json_data.get('password')
+
+    if not all([mobile, password]):
+        # 参数不全
+        return jsonify(errno=RET.PARAMERR, errmsg="参数不全")
+
+    try:
+        user = User.query.filter_by(mobile=mobile).first()
+    except Exception as e:
+        current_app.logger.error(e)
+        return jsonify(errno=RET.DBERR, errmsg="查询数据错误")
+
+    if not user:
+        return jsonify(errno=RET.USERERR, errmsg="用户不存在")
+
+    if not user.check_passowrd(password):
+        return jsonify(errno=RET.PWDERR, errmsg="密码错误")
+
+    # 保存登录状态
+    session['user_id'] = user.id
+    session['nick_name'] = user.nick_name
+    session['mobile'] = user.mobile
+
+    # 记录用户最后一次登录时间
+    user.last_login = datetime.now()
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        current_app.logger.error(e)
+
+    # 5. 登录成功
+    return jsonify(errno=RET.OK, errmsg="OK")
+
