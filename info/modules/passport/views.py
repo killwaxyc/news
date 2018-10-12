@@ -199,7 +199,7 @@ def login():
     if not all([mobile, password]):
         # 参数不全
         return jsonify(errno=RET.PARAMERR, errmsg="参数不全")
-
+    user = None
     try:
         user = User.query.filter_by(mobile=mobile).first()
     except Exception as e:
@@ -228,3 +228,17 @@ def login():
     # 5. 登录成功
     return jsonify(errno=RET.OK, errmsg="OK")
 
+
+@passport_blu.route('/logout', methods=["POST"])
+def logout():
+    """
+        清除session中的对应登录之后保存的信息
+        :return:
+        """
+    user_id = session.get('user_id')
+    if user_id:
+        session.pop('user_id', None)
+        session.pop('nick_name', None)
+        session.pop('mobile', None)
+
+    return jsonify(errno=RET.OK, errmsg="OK")
